@@ -9717,7 +9717,7 @@ nav.nav-right .slide.slide-out {
 .nav-trigger {
   top: 1em;
   background: white;
-  z-index: 3;
+  z-index: 6;
   height: calc( 3em  - 3px);
   margin-top: 2px;
   border: none;

@@ -119187,8 +119187,11 @@ goog.require('ol.style.Style');
 /**
  * Interactions for measure tools base class.
  * @typedef {{
+ *    decimals: (number|undefined),
+ *    displayHelpTooltip: (boolean|undefined),
  *    startMsg: (Element|undefined),
- *    style:(ol.style.Style|Array.<ol.style.Style>|ol.style.StyleFunction|undefined)
+ *    style: (ol.style.Style|Array.<ol.style.Style>|ol.style.StyleFunction|undefined),
+ *    sketchStyle: (ol.style.Style|Array.<ol.style.Style>|ol.style.StyleFunction|undefined)
  * }}
  */
 ngeo.interaction.MeasureBaseOptions;
@@ -120809,6 +120812,43 @@ ngeo.interaction.MeasurePointMobile.prototype.handleMeasure = function(
   var coord = geom.getLastCoordinate();
   callback(output, coord);
 };
+
+goog.provide('ngeo.proj.EPSG2056');
+
+goog.require('ol.proj');
+
+if (typeof proj4 == 'function') {
+  proj4.defs('EPSG:2056',
+      '+proj=somerc +lat_0=46.95240555555556 +lon_0=7.439583333333333 ' +
+      '+k_0=1 +x_0=2600000 +y_0=1200000 +ellps=bessel ' +
+      '+towgs84=674.374,15.056,405.346,0,0,0,0 +units=m +no_defs');
+  ol.proj.get('EPSG:2056').setExtent([2420000, 1030000, 2900000, 1350000]);
+}
+
+goog.provide('ngeo.proj.EPSG21781');
+
+goog.require('ol.proj');
+
+if (typeof proj4 == 'function') {
+  var epsg21781def = [
+    '+proj=somerc',
+    '+lat_0=46.95240555555556',
+    '+lon_0=7.439583333333333',
+    '+k_0=1',
+    '+x_0=600000',
+    '+y_0=200000',
+    '+ellps=bessel',
+    '+towgs84=674.4,15.1,405.3,0,0,0,0',
+    '+units=m',
+    '+no_defs'
+  ].join(' ');
+
+  var extent = [420000, 30000, 900000, 350000];
+  proj4.defs('epsg:21781', epsg21781def);
+  proj4.defs('EPSG:21781', epsg21781def);
+  ol.proj.get('epsg:21781').setExtent(extent);
+  ol.proj.get('EPSG:21781').setExtent(extent);
+}
 
 goog.provide('ngeo.BackgroundEvent');
 goog.provide('ngeo.BackgroundEventType');
