@@ -86582,23 +86582,14 @@ Pbf.prototype = {
 
     readVarint: function() {
         var buf = this.buf,
-            val, b, b0, b1, b2, b3;
+            val, b;
 
-        b0 = buf[this.pos++]; if (b0 < 0x80) return b0;                 b0 = b0 & 0x7f;
-        b1 = buf[this.pos++]; if (b1 < 0x80) return b0 | b1 << 7;       b1 = (b1 & 0x7f) << 7;
-        b2 = buf[this.pos++]; if (b2 < 0x80) return b0 | b1 | b2 << 14; b2 = (b2 & 0x7f) << 14;
-        b3 = buf[this.pos++]; if (b3 < 0x80) return b0 | b1 | b2 | b3 << 21;
+        b = buf[this.pos++]; val  =  b & 0x7f;        if (b < 0x80) return val;
+        b = buf[this.pos++]; val |= (b & 0x7f) << 7;  if (b < 0x80) return val;
+        b = buf[this.pos++]; val |= (b & 0x7f) << 14; if (b < 0x80) return val;
+        b = buf[this.pos++]; val |= (b & 0x7f) << 21; if (b < 0x80) return val;
 
-        val = b0 | b1 | b2 | (b3 & 0x7f) << 21;
-
-        b = buf[this.pos++]; val += (b & 0x7f) * 0x10000000;         if (b < 0x80) return val;
-        b = buf[this.pos++]; val += (b & 0x7f) * 0x800000000;        if (b < 0x80) return val;
-        b = buf[this.pos++]; val += (b & 0x7f) * 0x40000000000;      if (b < 0x80) return val;
-        b = buf[this.pos++]; val += (b & 0x7f) * 0x2000000000000;    if (b < 0x80) return val;
-        b = buf[this.pos++]; val += (b & 0x7f) * 0x100000000000000;  if (b < 0x80) return val;
-        b = buf[this.pos++]; val += (b & 0x7f) * 0x8000000000000000; if (b < 0x80) return val;
-
-        throw new Error('Expected varint not more than 10 bytes');
+        return readVarintRemainder(val, this);
     },
 
     readVarint64: function() {
@@ -86754,39 +86745,17 @@ Pbf.prototype = {
     writeVarint: function(val) {
         val = +val;
 
-        if (val <= 0x7f) {
-            this.realloc(1);
-            this.buf[this.pos++] = val;
-
-        } else if (val <= 0x3fff) {
-            this.realloc(2);
-            this.buf[this.pos++] = ((val >>> 0) & 0x7f) | 0x80;
-            this.buf[this.pos++] = ((val >>> 7) & 0x7f);
-
-        } else if (val <= 0x1fffff) {
-            this.realloc(3);
-            this.buf[this.pos++] = ((val >>> 0) & 0x7f) | 0x80;
-            this.buf[this.pos++] = ((val >>> 7) & 0x7f) | 0x80;
-            this.buf[this.pos++] = ((val >>> 14) & 0x7f);
-
-        } else if (val <= 0xfffffff) {
-            this.realloc(4);
-            this.buf[this.pos++] = ((val >>> 0) & 0x7f) | 0x80;
-            this.buf[this.pos++] = ((val >>> 7) & 0x7f) | 0x80;
-            this.buf[this.pos++] = ((val >>> 14) & 0x7f) | 0x80;
-            this.buf[this.pos++] = ((val >>> 21) & 0x7f);
-
-        } else {
-            var pos = this.pos;
-            while (val >= 0x80) {
-                this.realloc(1);
-                this.buf[this.pos++] = (val & 0xff) | 0x80;
-                val /= 0x80;
-            }
-            this.realloc(1);
-            this.buf[this.pos++] = val | 0;
-            if (this.pos - pos > 10) throw new Error('Given varint doesn\'t fit into 10 bytes');
+        if (val > 0xfffffff) {
+            writeBigVarint(val, this);
+            return;
         }
+
+        this.realloc(4);
+
+        this.buf[this.pos++] =           val & 0x7f  | (val > 0x7f ? 0x80 : 0); if (val <= 0x7f) return;
+        this.buf[this.pos++] = ((val >>>= 7) & 0x7f) | (val > 0x7f ? 0x80 : 0); if (val <= 0x7f) return;
+        this.buf[this.pos++] = ((val >>>= 7) & 0x7f) | (val > 0x7f ? 0x80 : 0); if (val <= 0x7f) return;
+        this.buf[this.pos++] =   (val >>> 7) & 0x7f;
     },
 
     writeSVarint: function(val) {
@@ -86833,17 +86802,7 @@ Pbf.prototype = {
         fn(obj, this);
         var len = this.pos - startPos;
 
-        var varintLen =
-            len <= 0x7f ? 1 :
-            len <= 0x3fff ? 2 :
-            len <= 0x1fffff ? 3 :
-            len <= 0xfffffff ? 4 : Math.ceil(Math.log(len) / (Math.LN2 * 7));
-
-        // if 1 byte isn't enough for encoding message length, shift the data to the right
-        if (varintLen > 1) {
-            this.realloc(varintLen - 1);
-            for (var i = this.pos - 1; i >= startPos; i--) this.buf[i + varintLen - 1] = this.buf[i];
-        }
+        if (len >= 0x80) reallocForRawMessage(startPos, len, this);
 
         // finally, write the message length in the reserved place and restore the position
         this.pos = startPos - 1;
@@ -86910,6 +86869,43 @@ Pbf.prototype = {
         this.writeVarintField(tag, Boolean(val));
     }
 };
+
+function readVarintRemainder(val, pbf) {
+    var buf = pbf.buf, b;
+
+    b = buf[pbf.pos++]; val += (b & 0x7f) * 0x10000000;         if (b < 0x80) return val;
+    b = buf[pbf.pos++]; val += (b & 0x7f) * 0x800000000;        if (b < 0x80) return val;
+    b = buf[pbf.pos++]; val += (b & 0x7f) * 0x40000000000;      if (b < 0x80) return val;
+    b = buf[pbf.pos++]; val += (b & 0x7f) * 0x2000000000000;    if (b < 0x80) return val;
+    b = buf[pbf.pos++]; val += (b & 0x7f) * 0x100000000000000;  if (b < 0x80) return val;
+    b = buf[pbf.pos++]; val += (b & 0x7f) * 0x8000000000000000; if (b < 0x80) return val;
+
+    throw new Error('Expected varint not more than 10 bytes');
+}
+
+function writeBigVarint(val, pbf) {
+    pbf.realloc(10);
+
+    var maxPos = pbf.pos + 10;
+
+    while (val >= 1) {
+        if (pbf.pos >= maxPos) throw new Error('Given varint doesn\'t fit into 10 bytes');
+        var b = val & 0xff;
+        pbf.buf[pbf.pos++] = b | (val >= 0x80 ? 0x80 : 0);
+        val /= 0x80;
+    }
+}
+
+function reallocForRawMessage(startPos, len, pbf) {
+    var extraLen =
+        len <= 0x3fff ? 1 :
+        len <= 0x1fffff ? 2 :
+        len <= 0xfffffff ? 3 : Math.ceil(Math.log(len) / (Math.LN2 * 7));
+
+    // if 1 byte isn't enough for encoding message length, shift the data to the right
+    pbf.realloc(extraLen);
+    for (var i = pbf.pos - 1; i >= startPos; i--) pbf.buf[i + extraLen] = pbf.buf[i];
+}
 
 function writePackedVarint(arr, pbf)   { for (var i = 0; i < arr.length; i++) pbf.writeVarint(arr[i]);   }
 function writePackedSVarint(arr, pbf)  { for (var i = 0; i < arr.length; i++) pbf.writeSVarint(arr[i]);  }
@@ -90472,7 +90468,7 @@ ol.format.WFS.writeUpdate_ = function(node, feature, objectStack) {
         values.push({name: keys[i], value: value});
       }
     }
-    ol.xml.pushSerializeAndPop({node: node, srsName:
+    ol.xml.pushSerializeAndPop({'node': node, 'srsName':
           context['srsName']},
     ol.format.WFS.TRANSACTION_SERIALIZERS_,
     ol.xml.makeSimpleNodeFactory('Property'), values,
@@ -90604,7 +90600,7 @@ ol.format.WFS.writeBboxFilter_ = function(node, filter, objectStack) {
 
   var context = objectStack[objectStack.length - 1];
   goog.asserts.assert(goog.isObject(context), 'context should be an Object');
-  context.srsName = filter.srsName;
+  context['srsName'] = filter.srsName;
 
   ol.format.WFS.writeOgcPropertyName_(node, filter.geometryName);
   ol.format.GML3.prototype.writeGeometryElement(node, filter.extent, objectStack);
@@ -90843,13 +90839,13 @@ ol.format.WFS.prototype.writeGetFeature = function(options) {
   ol.xml.setAttributeNS(node, 'http://www.w3.org/2001/XMLSchema-instance',
       'xsi:schemaLocation', this.schemaLocation_);
   var context = {
-    node: node,
-    srsName: options.srsName,
-    featureNS: options.featureNS ? options.featureNS : this.featureNS_,
-    featurePrefix: options.featurePrefix,
-    geometryName: options.geometryName,
-    filter: filter,
-    propertyNames: options.propertyNames ? options.propertyNames : []
+    'node': node,
+    'srsName': options.srsName,
+    'featureNS': options.featureNS,
+    'featurePrefix': options.featurePrefix,
+    'geometryName': options.geometryName,
+    'filter': filter,
+    'propertyNames': options.propertyNames ? options.propertyNames : []
   };
   goog.asserts.assert(Array.isArray(options.featureTypes),
       'options.featureTypes should be an array');
@@ -107000,7 +106996,7 @@ ngeo.Query.prototype.doGetFeatureRequests_ = function(
     items.forEach(function(item) {
       var layers = this.getLayersForItem_(item);
 
-      var featureRequestXml = wfsFormat.writeGetFeature({
+      var featureRequestXml = wfsFormat.writeGetFeature(/** @type {olx.format.WFSWriteGetFeatureOptions}*/ ({
         srsName: projCode,
         featureNS: this.featureNS_,
         featurePrefix: this.featurePrefix_,
@@ -107009,7 +107005,7 @@ ngeo.Query.prototype.doGetFeatureRequests_ = function(
         bbox: bbox,
         geometryName: this.geometryName_,
         maxFeatures: this.limit_
-      });
+      }));
 
       var featureRequest = xmlSerializer.serializeToString(featureRequestXml);
       var canceler = this.registerCanceler_();
@@ -124730,7 +124726,7 @@ if (typeof proj4 == 'function') {
 goog.provide('ngeo.AutoProjection');
 
 goog.require('ngeo');
-goog.require('ol.Extent');
+goog.require('ol.extent');
 goog.require('ol.proj');
 
 /**
@@ -130303,6 +130299,16 @@ goog.exportProperty(
     ol.MapBrowserPointerEvent.prototype,
     'preventDefault',
     ol.MapBrowserPointerEvent.prototype.preventDefault);
+
+goog.exportProperty(
+    ol.MapBrowserPointerEvent.prototype,
+    'preventDefault',
+    ol.MapBrowserPointerEvent.prototype.preventDefault);
+
+goog.exportProperty(
+    ol.MapBrowserPointerEvent.prototype,
+    'stopPropagation',
+    ol.MapBrowserPointerEvent.prototype.stopPropagation);
 
 goog.exportProperty(
     ol.MapBrowserPointerEvent.prototype,
