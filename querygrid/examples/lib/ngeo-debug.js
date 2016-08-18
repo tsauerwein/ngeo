@@ -95035,7 +95035,9 @@ ngeo.LayerHelper.prototype.createBasicWMSLayer = function(sourceURL,
  */
 ngeo.LayerHelper.prototype.createWMTSLayerFromCapabilitites = function(capabilitiesURL, layerName, opt_dimensions) {
   var parser = new ol.format.WMTSCapabilities();
-  var layer = new ol.layer.Tile();
+  var layer = new ol.layer.Tile({
+    preload: Infinity
+  });
   var $q = this.$q_;
 
   return this.$http_.get(capabilitiesURL).then(function(response) {
@@ -95165,7 +95167,7 @@ ngeo.LayerHelper.prototype.getLayerByName = function(layerName, layers) {
     if (layer instanceof ol.layer.Group) {
       var sublayers = layer.getLayers().getArray();
       found = this.getLayerByName(layerName, sublayers);
-    } else if (layer.get('layerName') === layerName) {
+    } else if (layer.get('layerNodeName') === layerName) {
       found = layer;
     }
     return !!found;
@@ -96093,6 +96095,7 @@ goog.require('ol.interaction.DragBox');
  *        ngeo-bbox-query=""
  *        ngeo-bbox-query-map="::ctrl.map"
  *        ngeo-bbox-query-active="ctrl.queryActive">
+ *        ngeo-bbox-query-autoclear="ctrl.queryAutoClear">
  *      </span>
  *
  * See the live example: {@link ../examples/bboxquery.html}
@@ -96137,7 +96140,9 @@ ngeo.bboxQueryDirective = function(ngeoQuery) {
             } else {
               // deactivate
               map.removeInteraction(interaction);
-              ngeoQuery.clear();
+              if (scope.$eval(attrs['ngeoBboxQueryAutoclear']) !== false) {
+                ngeoQuery.clear();
+              }
             }
           }
       );
@@ -96783,6 +96788,32 @@ ngeo.DMSCoordinates = function() {
 };
 
 ngeo.module.filter('ngeoDMSCoordinates', ngeo.DMSCoordinates);
+
+
+/**
+ * A filter to mark a value as trusted HTML.
+ *
+ * Usage:
+ *
+ *    <p ng-bind-html="ctrl.someValue | ngeoTrustHtml"></p>
+ *
+ * @return {function(?):string} The filter function.
+ * @ngInject
+ * @ngdoc filter
+ * @param {angular.$sce} $sce Angular sce service.
+ * @ngname ngeoTrustHtml
+ */
+ngeo.trustHtmlFilter = function($sce) {
+  return function(input) {
+    if (input !== undefined && input !== null) {
+      return $sce.trustAsHtml('' + input);
+    } else {
+      return input;
+    }
+  };
+};
+
+ngeo.module.filter('ngeoTrustHtml', ngeo.trustHtmlFilter);
 
 // Copyright 2010 The Closure Library Authors. All Rights Reserved.
 //
@@ -109592,6 +109623,8 @@ goog.provide('ngeo.gridDirective');
 goog.require('ngeo');
 goog.require('ol.has');
 goog.require('goog.asserts');
+/** @suppress {extraRequire} */
+goog.require('ngeo.filters');
 
 ngeo.module.value('ngeoGridTemplateUrl',
     /**
@@ -110519,7 +110552,8 @@ goog.require('ngeo.Query');
  *      <span
  *        ngeo-map-query=""
  *        ngeo-map-query-map="::ctrl.map"
- *        ngeo-map-query-active="ctrl.queryActive">
+ *        ngeo-map-query-active="ctrl.queryActive"
+ *        ngeo-map-query-autoclear="ctrl.queryAutoClear">
  *      </span>
  *
  * See our live example: {@link ../examples/mapquery.html}
@@ -110564,7 +110598,9 @@ ngeo.mapQueryDirective = function(ngeoQuery) {
           ol.events.unlistenByKey(clickEventKey_);
           clickEventKey_ = null;
         }
-        ngeoQuery.clear();
+        if (scope.$eval(attrs['ngeoMapQueryAutoclear']) !== false) {
+          ngeoQuery.clear();
+        }
       };
 
       // watch 'active' property -> activate/deactivate accordingly
@@ -122632,30 +122668,30 @@ ngeo.format.FeatureHash.setStyleInFeature_ = function(text, feature) {
   }
   var fillColor, fontSize, fontColor, pointRadius, strokeColor, strokeWidth;
   var properties = ngeo.format.FeatureHash.getStyleProperties_(text, feature);
-  fillColor = properties.fillColor;
-  fontSize = properties.fontSize;
-  fontColor = properties.fontColor;
-  pointRadius = properties.pointRadius;
-  strokeColor = properties.strokeColor;
-  strokeWidth = properties.strokeWidth;
+  fillColor = properties['fillColor'];
+  fontSize = properties['fontSize'];
+  fontColor = properties['fontColor'];
+  pointRadius = properties['pointRadius'];
+  strokeColor = properties['strokeColor'];
+  strokeWidth = properties['strokeWidth'];
 
   var fillStyle = null;
   if (fillColor !== undefined) {
     fillStyle = new ol.style.Fill({
-      color: fillColor
+      color: /** @type {Array<number>|string} */ (fillColor)
     });
   }
   var strokeStyle = null;
   if (strokeColor !== undefined && strokeWidth !== undefined) {
     strokeStyle = new ol.style.Stroke({
-      color: strokeColor,
-      width: strokeWidth
+      color: /** @type {Array<number>|string} */ (strokeColor),
+      width: /** @type {number} */ (strokeWidth)
     });
   }
   var imageStyle = null;
   if (pointRadius !== undefined) {
     imageStyle = new ol.style.Circle({
-      radius: pointRadius,
+      radius: /** @type {number} */ (pointRadius),
       fill: fillStyle,
       stroke: strokeStyle
     });
@@ -122666,7 +122702,7 @@ ngeo.format.FeatureHash.setStyleInFeature_ = function(text, feature) {
     textStyle = new ol.style.Text({
       font: fontSize + ' sans-serif',
       fill: new ol.style.Fill({
-        color: fontColor
+        color: /** @type {Array<number>|string} */ (fontColor)
       })
     });
   }
@@ -126853,6 +126889,9 @@ goog.require('goog.asserts');
 goog.require('ngeo');
 goog.require('ol.Observable');
 goog.require('ol.events');
+goog.require('ol.source.ImageWMS');
+goog.require('ol.source.TileWMS');
+goog.require('ol.source.WMTS');
 
 
 /**
@@ -126984,6 +127023,45 @@ ngeo.BackgroundLayerMgr.prototype.set = function(map, layer) {
   this.dispatchEvent(new ngeo.BackgroundEvent(ngeo.BackgroundEventType.CHANGE,
       previous));
   return previous;
+};
+
+/**
+ * @param {ol.Map} map The map.
+ * @param {Object.<string, string>} dimensions The global dimensions object.
+ * @export
+ */
+ngeo.BackgroundLayerMgr.prototype.updateDimensions = function(map, dimensions) {
+  var baseBgLayer = this.get(map);
+  if (baseBgLayer) {
+    var layers = [baseBgLayer];
+    if (baseBgLayer instanceof ol.layer.Group) {
+      // Handle the first level of layers of the base background layer.
+      layers = baseBgLayer.getLayers().getArray();
+    }
+
+    layers.forEach(function(layer) {
+      goog.asserts.assertInstanceof(layer, ol.layer.Layer);
+      if (layer) {
+        var updatedDimensions = {};
+        for (var key in layer.get('dimensions')) {
+          var value = dimensions[key];
+          if (value !== undefined) {
+            updatedDimensions[key] = value;
+          }
+        }
+        if (!ol.object.isEmpty(dimensions)) {
+          var source = layer.getSource();
+          if (source instanceof ol.source.WMTS) {
+            source.updateDimensions(updatedDimensions);
+            source.refresh();
+          } else if (source instanceof ol.source.TileWMS || source instanceof ol.source.ImageWMS) {
+            source.updateParams(updatedDimensions);
+            source.refresh();
+          }
+        }
+      }
+    });
+  }
 };
 
 
@@ -127203,11 +127281,13 @@ ngeo.CsvDownload.prototype.startDownload = function(data, columnDefs, fileName) 
   var fileContent = this.generateCsv(data, columnDefs);
 
   var hiddenElement = document.createElement('a');
+  // FF requires the link to be in the body
+  document.body.appendChild(hiddenElement);
   hiddenElement.href = 'data:attachment/csv,' + encodeURI(fileContent);
   hiddenElement.target = '_blank';
   hiddenElement.download = fileName;
   hiddenElement.click();
-  hiddenElement.remove();
+  document.body.removeChild(hiddenElement);
 };
 
 ngeo.module.service('ngeoCsvDownload', ngeo.CsvDownload);
@@ -127872,6 +127952,17 @@ ngeo.Location.prototype.hasParam = function(key) {
 
 
 /**
+ * Check if a param exists in the fragment of the location's URI.
+ * @param {string} key Param key.
+ * @return {boolean} True if the param exists.
+ * @export
+ */
+ngeo.Location.prototype.hasFragmentParam = function(key) {
+  return this.getFragmentUri_().getQueryData().containsKey(key);
+};
+
+
+/**
  * Get a param in the location's URI.
  * @param {string} key Param key.
  * @return {string} Param value.
@@ -127883,6 +127974,17 @@ ngeo.Location.prototype.getParam = function(key) {
 
 
 /**
+ * Get a param from the fragment of the location's URI.
+ * @param {string} key Param key.
+ * @return {string} Param value.
+ * @export
+ */
+ngeo.Location.prototype.getFragmentParam = function(key) {
+  return /** @type {string} */ (this.getFragmentUri_().getQueryData().get(key));
+};
+
+
+/**
  * Get a param in the location's URI as integer. If the entry does not exist,
  * or if the value can not be parsed as integer, `undefined` is returned.
  * @param {string} key Param key.
@@ -127890,10 +127992,27 @@ ngeo.Location.prototype.getParam = function(key) {
  * @export
  */
 ngeo.Location.prototype.getParamAsInt = function(key) {
-  if (!this.hasParam(key)) {
+  var value = /** @type {string} */ (this.getParam(key));
+  if (value === undefined) {
     return undefined;
   }
-  var value = /** @type {string} */ (this.uri_.getQueryData().get(key));
+  var valueAsInt = parseInt(value, 10);
+  return (isNaN(valueAsInt)) ? undefined : valueAsInt;
+};
+
+
+/**
+ * Get a param from the fragment of the location's URI as integer. If the entry
+ * does not exist, or if the value can not be parsed as integer, `undefined` is returned.
+ * @param {string} key Param key.
+ * @return {number|undefined} Param value.
+ * @export
+ */
+ngeo.Location.prototype.getFragmentParamAsInt = function(key) {
+  var value = /** @type {string} */ (this.getFragmentParam(key));
+  if (value === undefined) {
+    return undefined;
+  }
   var valueAsInt = parseInt(value, 10);
   return (isNaN(valueAsInt)) ? undefined : valueAsInt;
 };
@@ -127910,6 +128029,16 @@ ngeo.Location.prototype.getParamKeys = function() {
 
 
 /**
+ * Get an array with all existing param's keys from the fragment of the location's URI.
+ * @return {Array.<string>} Param keys.
+ * @export
+ */
+ngeo.Location.prototype.getFragmentParamKeys = function() {
+  return this.getFragmentUri_().getQueryData().getKeys();
+};
+
+
+/**
  * Get an array with all existing param's keys in the location's URI that start
  * with the given prefix.
  * @param {string} prefix Key prefix.
@@ -127917,7 +128046,21 @@ ngeo.Location.prototype.getParamKeys = function() {
  * @export
  */
 ngeo.Location.prototype.getParamKeysWithPrefix = function(prefix) {
-  return this.uri_.getQueryData().getKeys().filter(function(key) {
+  return this.getParamKeys().filter(function(key) {
+    return key.indexOf(prefix) == 0;
+  });
+};
+
+
+/**
+ * Get an array with all existing param's keys from the fragment of the location's URI
+ * that start with the given prefix.
+ * @param {string} prefix Key prefix.
+ * @return {Array.<string>} Param keys.
+ * @export
+ */
+ngeo.Location.prototype.getFragmentParamKeysWithPrefix = function(prefix) {
+  return this.getFragmentParamKeys().filter(function(key) {
     return key.indexOf(prefix) == 0;
   });
 };
@@ -127937,12 +128080,39 @@ ngeo.Location.prototype.updateParams = function(params) {
 
 
 /**
+ * Set or create a param in the fragment of the location's URI.
+ * @param {Object.<string, string>} params Parameters.
+ * @export
+ */
+ngeo.Location.prototype.updateFragmentParams = function(params) {
+  var fragmentUri = this.getFragmentUri_();
+  var qd = fragmentUri.getQueryData();
+  goog.object.forEach(params, function(val, key) {
+    qd.set(key, val);
+  });
+  this.updateFragmentFromUri_(fragmentUri);
+};
+
+
+/**
  * Delete a param in the location's URI.
  * @param {string} key Param key.
  * @export
  */
 ngeo.Location.prototype.deleteParam = function(key) {
   this.uri_.getQueryData().remove(key);
+};
+
+
+/**
+ * Delete a param int the fragment of the location's URI.
+ * @param {string} key Param key.
+ * @export
+ */
+ngeo.Location.prototype.deleteFragmentParam = function(key) {
+  var fragmentUri = this.getFragmentUri_();
+  fragmentUri.getQueryData().remove(key);
+  this.updateFragmentFromUri_(fragmentUri);
 };
 
 
@@ -127962,6 +128132,32 @@ ngeo.Location.prototype.refresh = function() {
  */
 ngeo.Location.prototype.setPath = function(path) {
   this.uri_.setPath(path);
+};
+
+
+/**
+ * Return a {@link goog.Uri} instance where the fragment parameters are set
+ * as query parameters.
+ * @return {goog.Uri} An uri.
+ * @private
+ */
+ngeo.Location.prototype.getFragmentUri_ = function() {
+  var fragment = this.uri_.getFragment();
+  var uri = new goog.Uri(null);
+  uri.setQueryData(fragment);
+  return uri;
+};
+
+
+/**
+ * Update the fragment of the Uri with the given uri which contains
+ * fragment parameters as query params.
+ * @param {goog.Uri} fragmentUri An uri.
+ * @private
+ */
+ngeo.Location.prototype.updateFragmentFromUri_ = function(fragmentUri) {
+  var fragment = fragmentUri.getQueryData().toDecodedString();
+  this.uri_.setFragment(fragment);
 };
 
 
@@ -130190,9 +130386,8 @@ ngeo.StateManager = function(ngeoLocation) {
       this.ngeoLocation.updateParams(locationInitState);
     }
   } else {
-    var keys = ngeoLocation.getParamKeys();
-    for (i = 0; i < keys.length; ++i) {
-      key = keys[i];
+    for (i = 0; i < paramKeys.length; ++i) {
+      key = paramKeys[i];
       this.initialState[key] = this.getItemFromLocation_(key);
     }
     //Retrieve selected theme in url path
@@ -130989,7 +131184,7 @@ goog.require('ngeo');
   var runner = function($templateCache) {
     $templateCache.put('ngeo/attributes.html', '<fieldset ng-disabled=attrCtrl.disabled> <div class=form-group ng-repeat="attribute in ::attrCtrl.attributes"> <div ng-if="attribute.type !== \'geometry\'"> <label>{{::attribute.required ? "* " : ""}}{{ ::attribute.name }}:</label> <div ng-switch=attribute.type> <select name={{::attribute.name}} ng-required=attribute.required ng-switch-when=select ng-model=attrCtrl.properties[attribute.name] ng-change=attrCtrl.handleInputChange(attribute.name); class=form-control type=text> <option ng-repeat="attribute in ::attribute.choices" value="{{ ::attribute }}"> {{ ::attribute }} </option> </select> <input name={{::attribute.name}} ng-required=attribute.required ng-switch-when=date ui-date=attrCtrl.dateOptions ng-model=attrCtrl.properties[attribute.name] ng-change=attrCtrl.handleInputChange(attribute.name); class=form-control type=text> <input name={{::attribute.name}} ng-required=attribute.required ng-switch-when=datetime ui-date=attrCtrl.dateOptions ng-model=attrCtrl.properties[attribute.name] ng-change=attrCtrl.handleInputChange(attribute.name); class=form-control type=text> <input name={{::attribute.name}} ng-required=attribute.required ng-switch-default ng-model=attrCtrl.properties[attribute.name] ng-change=attrCtrl.handleInputChange(attribute.name); class=form-control type=text> <div ng-show="form.$submitted || form[attribute.name].$touched"> <p class=text-danger ng-show=form[attribute.name].$error.required> {{\'This field is required\' | translate}} </p> </div> </div> </div> </div> </fieldset> ');
     $templateCache.put('ngeo/popup.html', '<h4 class="popover-title ngeo-popup-title"> <span ng-bind-html=title></span> <button type=button class=close ng-click="open = false"> &times;</button> </h4> <div class=popover-content ng-bind-html=content></div> ');
-    $templateCache.put('ngeo/grid.html', '<div class=table-container> <table float-thead=ctrl.floatTheadConfig ng-model=ctrl.configuration.data class="table table-bordered table-striped table-hover"> <thead class=table-header> <tr> <th ng-repeat="columnDefs in ctrl.configuration.columnDefs" ng-click=ctrl.sort(columnDefs.name)>{{columnDefs.name | translate}} <i ng-show="ctrl.sortedBy !== columnDefs.name" class="fa fa-fw"></i> <i ng-show="ctrl.sortedBy === columnDefs.name && ctrl.sortAscending === true" class="fa fa-caret-up"></i> <i ng-show="ctrl.sortedBy === columnDefs.name && ctrl.sortAscending === false" class="fa fa-caret-down"></i> </th> </tr> </thead> <tbody> <tr ng-repeat="attributes in ctrl.configuration.data" ng-class="[\'row-\' + ctrl.configuration.getRowUid(attributes), ctrl.configuration.isRowSelected(attributes) ? \'active\': \'\']" ng-click="ctrl.clickRow(attributes, $event)" ng-mousedown=ctrl.preventTextSelection($event)> <td ng-repeat="columnDefs in ctrl.configuration.columnDefs" translate>{{attributes[columnDefs.name]}}</td> </tr> </tbody> </table> </div> ');
+    $templateCache.put('ngeo/grid.html', '<div class=table-container> <table float-thead=ctrl.floatTheadConfig ng-model=ctrl.configuration.data class="table table-bordered table-striped table-hover"> <thead class=table-header> <tr> <th ng-repeat="columnDefs in ctrl.configuration.columnDefs" ng-click=ctrl.sort(columnDefs.name)>{{columnDefs.name | translate}} <i ng-show="ctrl.sortedBy !== columnDefs.name" class="fa fa-fw"></i> <i ng-show="ctrl.sortedBy === columnDefs.name && ctrl.sortAscending === true" class="fa fa-caret-up"></i> <i ng-show="ctrl.sortedBy === columnDefs.name && ctrl.sortAscending === false" class="fa fa-caret-down"></i> </th> </tr> </thead> <tbody> <tr ng-repeat="attributes in ctrl.configuration.data" ng-class="[\'row-\' + ctrl.configuration.getRowUid(attributes), ctrl.configuration.isRowSelected(attributes) ? \'active\': \'\']" ng-click="ctrl.clickRow(attributes, $event)" ng-mousedown=ctrl.preventTextSelection($event)> <td ng-repeat="columnDefs in ctrl.configuration.columnDefs" ng-bind-html="attributes[columnDefs.name] | ngeoTrustHtml"></td> </tr> </tbody> </table> </div> ');
     $templateCache.put('ngeo/scaleselector.html', '<div class="btn-group btn-block" ng-class="::{\'dropup\': scaleselectorCtrl.options.dropup}"> <button type=button class="btn btn-default dropdown-toggle" data-toggle=dropdown aria-expanded=false> <span ng-bind-html=scaleselectorCtrl.currentScale|ngeoScalify></span>&nbsp;<i class=caret></i> </button> <ul class="dropdown-menu btn-block" role=menu> <li ng-repeat="zoomLevel in ::scaleselectorCtrl.zoomLevels"> <a href ng-click=scaleselectorCtrl.changeZoom(zoomLevel) ng-bind-html=::scaleselectorCtrl.getScale(zoomLevel)|ngeoScalify> </a> </li> </ul> </div> ');
     $templateCache.put('ngeo/datepicker.html', '<div class=ngeo-datepicker> <form name=dateForm class=datepicker-form novalidate> <div ng-if="::datepickerCtrl.time.widget === \'datepicker\'"> <div class=start-date> <span ng-if="::datepickerCtrl.time.mode === \'range\'" translate>From:</span> <span ng-if="::datepickerCtrl.time.mode !== \'range\'" translate>Date:</span> <input name=sdate ui-date=datepickerCtrl.sdateOptions ng-model=datepickerCtrl.sdate required> </div> <div class=end-date ng-if="::datepickerCtrl.time.mode === \'range\'"> <span translate>To:</span> <input name=edate ui-date=datepickerCtrl.edateOptions ng-model=datepickerCtrl.edate required> </div> </div> </form> </div> ');
     $templateCache.put('ngeo/layertree.html', '<span ng-if=::!layertreeCtrl.isRoot>{{::layertreeCtrl.node.name}}</span> <input type=checkbox ng-if="::layertreeCtrl.node && !layertreeCtrl.node.children" ng-model=layertreeCtrl.getSetActive ng-model-options="{getterSetter: true}"> <ul ng-if=::layertreeCtrl.node.children> <li ng-repeat="node in ::layertreeCtrl.node.children" ngeo-layertree=::node ngeo-layertree-notroot ngeo-layertree-map=layertreeCtrl.map ngeo-layertree-nodelayerexpr=layertreeCtrl.nodelayerExpr ngeo-layertree-listenersexpr=layertreeCtrl.listenersExpr> </li> </ul> ');

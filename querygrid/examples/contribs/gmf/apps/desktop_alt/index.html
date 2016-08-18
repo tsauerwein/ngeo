@@ -47,7 +47,7 @@
               data-toggle="tooltip" data-placement="left" data-original-title="{{'Login'|translate}}">
               <span class="fa fa-user"></span>
             </button>
-            <button ngeo-btn class="btn btn-default" ng-model="printActive"
+            <button ngeo-btn class="btn btn-default" ng-model="mainCtrl.printPanelActive"
               data-toggle="tooltip" data-placement="left" data-original-title="{{'Print'|translate}}">
               <span class="fa fa-print"></span>
             </button>
@@ -82,15 +82,15 @@
               <gmf-authentication></gmf-authentication>
             </div>
           </div>
-          <div ng-show="printActive" class="row">
+          <div ng-show="mainCtrl.printPanelActive" class="row">
             <div class="col-sm-12">
               <div class="tools-content-heading">
                 {{'Print' | translate}}
-                <a class="btn close" ng-click="printActive = false">&times;</a>
+                <a class="btn close" ng-click="mainCtrl.printPanelActive = false">&times;</a>
               </div>
               <gmf-print
                 gmf-print-map="mainCtrl.map"
-                gmf-print-active="printActive"
+                gmf-print-active="mainCtrl.printActive"
                 gmf-print-rotatemask="true">
               </gmf-print>
             </div>
@@ -183,9 +183,11 @@
           ngeo-map-query=""
           ngeo-map-query-map="::mainCtrl.map"
           ngeo-map-query-active="mainCtrl.queryActive"
+          ngeo-map-query-autoclear="mainCtrl.queryAutoClear"
           ngeo-bbox-query=""
           ngeo-bbox-query-map="::mainCtrl.map"
-          ngeo-bbox-query-active="mainCtrl.queryActive">
+          ngeo-bbox-query-active="mainCtrl.queryActive"
+          ngeo-bbox-query-autoclear="mainCtrl.queryAutoClear">
         </gmf-map>
 
         <!--infobar-->
@@ -240,7 +242,7 @@
     <script src="../../../../lib/watchwatchers.js"></script>
     <script>
       (function() {
-        var cacheVersion = 'a21208e4f385b090c4c1e6f08e78478d323f737d';
+        var cacheVersion = '89b7cb5e13720ea76ac8aea884a3f77a52bc6682';
         var urlElements = window.location.pathname.split('/');
 
         var angularLocaleScriptUrlElements = urlElements.slice(0, urlElements.length - 3);
